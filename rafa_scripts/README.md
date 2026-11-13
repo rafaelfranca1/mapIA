@@ -19,7 +19,7 @@ A origem está fixa em `extrai_imagens.py`: `data/raw/imagens/Albernaz Velho_Exe
 | Extrair PDF e copiar o resto | `extrai_imagens.py` | `rafa_scripts/output/Albernaz Velho_Exemplos/<obra>` |
 | Fatiar patches | `gera_patches.py` | `rafa_scripts/output/patches_albernaz/<obra>` |
 
-De um PDF, cada imagem sai como `pag_XXX_xref_N.ext`, com a extensão original (`jpeg`, `png` e o que o PyMuPDF devolver). Um `xref` repetido no mesmo PDF é gravado uma vez, na primeira página em que aparece. `.jpg`, `.jpeg`, `.tif` e qualquer outro arquivo da pasta são copiados com o nome original para a mesma pasta de saída.
+De um PDF, cada imagem sai como `{nome do pdf}_pag_XXX_xref_N.ext`, com a extensão original (`jpeg`, `png` e o que o PyMuPDF devolver). O nome do PDF entra no prefixo para dois volumes na mesma pasta não gravarem por cima um do outro. Um `xref` repetido no mesmo PDF é gravado uma vez, na primeira página em que aparece. `.jpg`, `.jpeg`, `.tif` e qualquer outro arquivo da pasta são copiados com o nome original para a mesma pasta de saída.
 
 `rafa_scripts/output/*` está no [`.gitignore`](../.gitignore) da raiz.
 

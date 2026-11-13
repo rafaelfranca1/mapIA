@@ -27,8 +27,9 @@ def extrair_com_pymupdf(pdf_path: str, output_dir: str) -> None:
       image_bytes = base_image["image"]
       image_ext = base_image["ext"]
 
-      nome_arquivo = f"pag_{page_index + 1:03d}_xref_{xref}.{image_ext}"
-      caminho_completo = os.path.join(output_dir, nome_arquivo)
+      nome_pdf = os.path.splitext(os.path.basename(pdf_path))[0]
+      nome_saida = f"{nome_pdf}_pag_{page_index + 1:03d}_xref_{xref}.{image_ext}"
+      caminho_completo = os.path.join(output_dir, nome_saida)
 
       with open(caminho_completo, "wb") as f:
         f.write(image_bytes)

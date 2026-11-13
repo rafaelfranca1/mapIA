@@ -5,12 +5,18 @@ dourada para dentro**, padroniza com **letterbox** (sem distorção) e salva em 
 `torchvision.datasets.ImageFolder`.
 
 ## Instalação
+
+Na raiz do repositório (Python >= 3.9; sem Poppler):
+
 ```bash
 python -m venv .venv && source .venv/bin/activate
-pip install -r requirements.txt     # Python >= 3.9; sem Poppler
+pip install -r requirements.txt
 ```
 
 ## Uso
+
+Rode a partir de `recorte_database/`:
+
 ```bash
 # 1) CALIBRAR (não grava o dataset): 30 painéis  Antes | Máscara dourada | Depois
 python main.py -i data/raw --dry-run --debug-samples 30 --debug-dir data/debug
@@ -31,35 +37,41 @@ python main.py -i data/raw -o out --workers 1 -v              # sequencial + log
   e reduza no treino (`RandomResizedCrop(224)`). A ResNet aceita 384/512 (custo ~5x em 512 vs 224).
 - Padrão de saída: **JPEG q95, 4:4:4** (muito menor que PNG; diferença visual desprezível). Use `--format png` se quiser sem perdas.
 
-## Recorte pela moldura dourada
-1. Remove a borda branca externa. 2. Máscara de "dourado" em HSV. 3. Em cada lado, acha a banda dourada colada à borda
-e recorta na borda **interna** dela (+ respiro `--frame-inner-margin`, padrão 0,2%).
-Se a moldura não for achada (ou o recorte for implausível), aplica `--frame-fallback`: `keep` (borda branca + aviso no log
-e contagem no relatório) ou `skip` (descarta e conta como "rejeitada").
+## Recorte pela moldura (dourada → tinta → borda branca)
+1. Remove a borda branca externa. 2. Máscara de "dourado" em HSV; em cada lado, acha a banda dourada e recorta na
+borda **interna** (+ respiro `--frame-inner-margin`, padrão 0,2%).
+3. Se não houver dourado, tenta **moldura de tinta** (retângulo preto/vermelho via Canny/contornos) — típico de
+páginas de atlas.
+4. Se ainda falhar, aplica `--frame-fallback`: `keep` (borda branca + aviso) ou `skip` (descarta).
+Modo só tinta: `--crop-mode ink-frame`.
 
 **Calibração** (olhe `data/debug`; azul = borda branca, vermelho = recorte final, painel central = máscara dourada):
 
 | Sintoma | Ajuste |
 |---|---|
-| Máscara pega o miolo (pergaminho amarelado) | subir `--frame-min-sat` (ex.: 120) ou estreitar `--frame-hue` |
+| Máscara pega o miolo (pergaminho amarelado) | subir `--frame-min-sat` (ex.: 100) ou estreitar `--frame-hue` |
 | Moldura não aparece na máscara | descer `--frame-min-sat`/`--frame-min-val` ou alargar `--frame-hue` (ex.: `10,40`) |
-| Moldura detectada em 3/4 lados | `--frame-min-sides 3` ou baixar `--frame-band-ratio` (0.4) |
+| Moldura detectada em 2/4 lados | baixar `--frame-min-sides` (padrão 3) ou `--frame-band-ratio` |
 | Sobra um fio dourado dentro | subir `--frame-inner-margin` (ex.: `0.005`) |
 | Molduras muito grossas | subir `--frame-search` (padrão 0.25 = 25% do lado) |
 
 ## Arquitetura (OO + polimorfismo)
+
+Pacote plano `recorte_database/`:
+
 ```
-main.py                      CLI -> Settings -> DatasetPipeline
-config.py                    constantes + Settings (dataclass imutável)
-dataset_prep/
-  readers.py    ImageReader (ABC) -> PdfReader | TiffReader | RasterReader ; ReaderRegistry (despacho por extensão)
-  croppers.py   Cropper (ABC)     -> WhiteBorderCropper | GoldFrameCropper (decora um Cropper base) | NullCropper
-  resizers.py   Resizer (ABC)     -> LetterboxResizer
-  writers.py    ImageWriter (ABC) -> PngWriter | JpegWriter
-  processing.py ImageProcessor (Cropper + Resizer injetados) ; FileProcessor (leitura -> processamento -> escrita)
-  pipeline.py   DatasetPipeline: descoberta, multiprocessing, relatório
-  factory.py    Settings -> objetos concretos (CROPPER_BUILDERS / WRITER_BUILDERS)
-  reporting.py  logging + Report ;  debug.py DebugRenderer ;  models.py / geometry.py / conversions.py
+main.py          CLI -> Settings -> DatasetPipeline
+config.py        constantes + Settings (dataclass imutável)
+readers.py       ImageReader (ABC) -> PdfReader | TiffReader | RasterReader ; ReaderRegistry
+croppers.py      Cropper (ABC) -> WhiteBorderCropper | GoldFrameCropper | InkFrameCropper | NullCropper
+resizers.py      Resizer (ABC) -> LetterboxResizer
+writers.py       ImageWriter (ABC) -> PngWriter | JpegWriter
+processing.py    ImageProcessor (Cropper + Resizer) ; FileProcessor (leitura -> processamento -> escrita)
+pipeline.py      DatasetPipeline: descoberta, multiprocessing, relatório
+factory.py       Settings -> objetos concretos (CROPPER_BUILDERS / WRITER_BUILDERS)
+reporting.py     logging + Report
+debug.py         DebugRenderer
+models.py        geometry.py    conversions.py
 ```
 Para estender, implemente a ABC e registre em `factory.py`. Ex.: novo formato = subclasse de `ImageReader` na lista de
 `build_readers`; novo recorte = subclasse de `Cropper` + entrada em `CROPPER_BUILDERS` (e em `config.CROP_MODES`).

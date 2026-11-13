@@ -8,7 +8,9 @@ from __future__ import annotations
 from typing import Callable, Dict
 
 from .config import Settings
-from .croppers import Cropper, GoldFrameCropper, NullCropper, WhiteBorderCropper
+from .croppers import (
+    Cropper, GoldFrameCropper, InkFrameCropper, NullCropper, WhiteBorderCropper,
+)
 from .processing import FileProcessor, ImageProcessor
 from .readers import PdfReader, RasterReader, ReaderRegistry, TiffReader
 from .resizers import LetterboxResizer, Resizer
@@ -19,17 +21,28 @@ def _white(s: Settings) -> Cropper:
     return WhiteBorderCropper(s.white_threshold, s.crop_margin, s.morph_kernel, s.min_content_pixels)
 
 
+def _ink(s: Settings) -> Cropper:
+    return InkFrameCropper(
+        base=_white(s), detect_max_side=s.detect_max_side,
+        canny_low=s.ink_canny_low, canny_high=s.ink_canny_high,
+        min_area_ratio=s.ink_min_area_ratio, max_area_ratio=s.ink_max_area_ratio,
+        inner_margin=s.frame_inner_margin,
+    )
+
+
 def _gold(s: Settings) -> Cropper:
     return GoldFrameCropper(
         base=_white(s), hue_range=s.frame_hue, min_saturation=s.frame_min_sat,
         min_value=s.frame_min_val, band_ratio=s.frame_band_ratio,
         search_fraction=s.frame_search_fraction, inner_margin=s.frame_inner_margin,
         min_sides=s.frame_min_sides, fallback=s.frame_fallback,
-        detect_max_side=s.detect_max_side)
+        detect_max_side=s.detect_max_side, secondary=_ink(s),
+    )
 
 
 CROPPER_BUILDERS: Dict[str, Callable[[Settings], Cropper]] = {
     "gold-frame": _gold,
+    "ink-frame": _ink,
     "white": _white,
     "none": lambda s: NullCropper(),
 }

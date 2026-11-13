@@ -2,7 +2,7 @@
 
 Camadas (cada uma com uma ABC e implementações intercambiáveis):
     readers   -> ImageReader   (PdfReader, TiffReader, RasterReader)
-    croppers  -> Cropper       (WhiteBorderCropper, GoldFrameCropper, NullCropper)
+    croppers  -> Cropper       (WhiteBorderCropper, GoldFrameCropper, InkFrameCropper, NullCropper)
     resizers  -> Resizer       (LetterboxResizer)
     writers   -> ImageWriter   (PngWriter, JpegWriter)
 """

@@ -37,10 +37,10 @@ PADDING_PRESETS = {
 # --------------------------------------------------------------------------- #
 # Recorte
 # --------------------------------------------------------------------------- #
-CROP_MODES = ("gold-frame", "white", "none")
+CROP_MODES = ("gold-frame", "ink-frame", "white", "none")
 CROP_MODE: str = "gold-frame"
-"""gold-frame: recorta da moldura dourada para dentro; white: só remove borda
-branca; none: não recorta."""
+"""gold-frame: moldura dourada, depois tinta (preta/vermelha), depois borda
+branca; ink-frame: só retângulo de tinta; white: só borda branca; none: nada."""
 
 # Borda branca (também é o 1º passo do modo gold-frame)
 WHITE_THRESHOLD: int = 245       # cinza < threshold = conteúdo
@@ -50,14 +50,20 @@ CROP_MARGIN: Union[int, float] = 5  # int = px; float < 1 = fração
 
 # Moldura dourada (HSV do OpenCV: H 0-179, S/V 0-255)
 FRAME_HUE: Tuple[int, int] = (15, 35)
-FRAME_MIN_SAT: int = 90          # suba se o pergaminho do miolo for detectado como moldura
+FRAME_MIN_SAT: int = 70          # molduras desbotadas ficam ~S 50-80; 90 falhava na maioria
 FRAME_MIN_VAL: int = 100
-FRAME_BAND_RATIO: float = 0.5    # fração dourada da linha/coluna p/ contar como moldura
+FRAME_BAND_RATIO: float = 0.4    # fração dourada da linha/coluna p/ contar como moldura
 FRAME_SEARCH_FRACTION: float = 0.25  # espessura máx. da moldura (fração do lado)
 FRAME_INNER_MARGIN: Union[int, float] = 0.002  # respiro após a borda interna (0.002 = 0,2%)
-FRAME_MIN_SIDES: int = 4         # lados em que a moldura deve ser encontrada
+FRAME_MIN_SIDES: int = 3         # 3/4 tolera um lado desbotado/contaminado pelo miolo
 FRAME_FALLBACK: str = "keep"     # sem moldura: 'keep' (borda branca + aviso) ou 'skip'
 DETECT_MAX_SIDE: int = 1500      # a detecção roda em versão reduzida (rápido)
+
+# Moldura de tinta (retângulo preto/vermelho; fallback do gold-frame)
+INK_CANNY_LOW: int = 40
+INK_CANNY_HIGH: int = 120
+INK_MIN_AREA_RATIO: float = 0.22
+INK_MAX_AREA_RATIO: float = 0.82
 
 # --------------------------------------------------------------------------- #
 # Leitura / paralelismo
@@ -97,6 +103,10 @@ class Settings:
     frame_min_sides: int = FRAME_MIN_SIDES
     frame_fallback: str = FRAME_FALLBACK
     detect_max_side: int = DETECT_MAX_SIDE
+    ink_canny_low: int = INK_CANNY_LOW
+    ink_canny_high: int = INK_CANNY_HIGH
+    ink_min_area_ratio: float = INK_MIN_AREA_RATIO
+    ink_max_area_ratio: float = INK_MAX_AREA_RATIO
     pdf_dpi: int = PDF_DPI
     pdf_max_side: int = PDF_MAX_SIDE
     workers: int = WORKERS

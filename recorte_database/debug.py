@@ -33,7 +33,8 @@ class DebugRenderer:
 
         panels: List[Tuple[str, np.ndarray]] = [(f"Antes {w}x{h}", left)]
         if crop.debug_mask is not None and crop.outer_bbox is not None:
-            panels.append(("Mascara dourada", self._mask_panel(left.shape, crop, s)))
+            label = "Mascara tinta" if crop.method == "ink-frame" else "Mascara dourada"
+            panels.append((label, self._mask_panel(left.shape, crop, s)))
         if outcome.image is None:
             right = np.full((H, H, 3), 200, dtype=np.uint8)
             cv2.putText(right, crop.status.name, (20, H // 2),

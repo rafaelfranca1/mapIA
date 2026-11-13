@@ -13,7 +13,7 @@ from typing import List, Optional, Set
 import cv2
 from tqdm import tqdm
 
-from config import Settings
+from .config import Settings
 from .factory import build_file_processor, build_readers
 from .models import FileResult, Task
 from .processing import FileProcessor

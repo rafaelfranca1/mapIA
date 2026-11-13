@@ -72,6 +72,8 @@ class GoldFrameCropper(Cropper):
 
     1. ``base`` (borda branca) isola a área útil externa.
     2. Máscara de "dourado" em HSV (matiz/saturação/valor configuráveis).
+       Tenta saturação mais estrita (max(min_sat, 90)) e, se falhar, a
+       configurada — molduras vivas vs. desbotadas.
     3. Para cada lado, perfil de fração dourada por linha/coluna (usando só a
        parte central do lado, para não contar a moldura perpendicular). A
        banda da moldura é o trecho contínuo, colado à borda, acima de
@@ -80,20 +82,21 @@ class GoldFrameCropper(Cropper):
        independente da resolução.
 
     Se a moldura não for detectada em ``min_sides`` lados (ou o recorte for
-    implausível), aplica ``fallback``: ``keep`` (usa recorte de borda branca,
-    com aviso) ou ``skip`` (rejeita a imagem).
+    implausível), tenta ``secondary`` (ex.: ``InkFrameCropper``) e, se ainda
+    falhar, aplica ``fallback``: ``keep`` (borda branca) ou ``skip``.
     """
 
     name = "gold-frame"
-    _MAX_START_FRACTION = 0.05   # a moldura deve começar a <=5% da borda externa
+    _MAX_START_FRACTION = 0.15   # moldura pode estar inseta se a borda escura não for cortada
     _CENTER = (0.2, 0.8)         # trecho central do lado usado no perfil
 
     def __init__(self, base: Cropper, hue_range: Tuple[int, int] = (15, 35),
-                 min_saturation: int = 90, min_value: int = 100,
-                 band_ratio: float = 0.5, search_fraction: float = 0.25,
-                 inner_margin: Margin = 0.002, min_sides: int = 4,
+                 min_saturation: int = 70, min_value: int = 100,
+                 band_ratio: float = 0.4, search_fraction: float = 0.25,
+                 inner_margin: Margin = 0.002, min_sides: int = 3,
                  fallback: str = "keep", detect_max_side: int = 1500,
-                 min_inner_ratio: float = 0.3) -> None:
+                 min_inner_ratio: float = 0.3,
+                 secondary: Optional[Cropper] = None) -> None:
         if fallback not in ("keep", "skip"):
             raise ValueError("fallback deve ser 'keep' ou 'skip'")
         self.base = base
@@ -107,6 +110,7 @@ class GoldFrameCropper(Cropper):
         self.fallback = fallback
         self.detect_max_side = detect_max_side
         self.min_inner_ratio = min_inner_ratio
+        self.secondary = secondary  # ex.: InkFrameCropper quando não há dourado
 
     # ------------------------------------------------------------------ API
     def crop_box(self, rgb: np.ndarray) -> CropResult:
@@ -121,11 +125,32 @@ class GoldFrameCropper(Cropper):
         small = region if scale == 1.0 else cv2.resize(
             region, (max(1, round(w * scale)), max(1, round(h * scale))),
             interpolation=cv2.INTER_AREA)
-        mask = self._gold_mask(small)
-        found = {k: v for k, v in self._side_extents(mask).items() if v is not None}
+
+        # Saturação adaptativa: estrita primeiro (evita miolo amarelado),
+        # depois a configurada (molduras desbotadas).
+        sats: list[int] = []
+        for sat in (max(self.min_saturation, 90), self.min_saturation):
+            if sat not in sats:
+                sats.append(sat)
+
+        best_mask: Optional[np.ndarray] = None
+        best_found: Dict[str, int] = {}
+        for sat in sats:
+            mask = self._gold_mask(small, min_saturation=sat)
+            extents = self._side_extents(mask)
+            found = {k: v for k, v in extents.items() if v is not None}
+            if len(found) > len(best_found):
+                best_mask, best_found = mask, found
+            if len(found) >= self.min_sides:
+                best_mask, best_found = mask, found
+                break
+
+        mask = best_mask if best_mask is not None else self._gold_mask(small)
+        found = best_found
 
         if len(found) < self.min_sides:
-            return self._fallback(outer, mask, f"moldura dourada detectada em {len(found)}/4 lados")
+            return self._fallback(
+                outer, mask, f"moldura dourada detectada em {len(found)}/4 lados", rgb)
 
         inv = 1.0 / scale
         pad = resolve_margin(self.inner_margin, min(w, h))
@@ -135,13 +160,15 @@ class GoldFrameCropper(Cropper):
 
         if (bbox[2] - bbox[0] < self.min_inner_ratio * w
                 or bbox[3] - bbox[1] < self.min_inner_ratio * h):
-            return self._fallback(outer, mask, "recorte interno implausível (muito pequeno)")
+            return self._fallback(outer, mask, "recorte interno implausível (muito pequeno)", rgb)
         return CropResult(CropStatus.OK, bbox, outer.bbox, self.name, debug_mask=mask)
 
     # ------------------------------------------------------------ internals
-    def _gold_mask(self, rgb_small: np.ndarray) -> np.ndarray:
+    def _gold_mask(self, rgb_small: np.ndarray,
+                   min_saturation: Optional[int] = None) -> np.ndarray:
+        sat = self.min_saturation if min_saturation is None else min_saturation
         hsv = cv2.cvtColor(rgb_small, cv2.COLOR_RGB2HSV)
-        lo = np.array([self.hue_range[0], self.min_saturation, self.min_value], np.uint8)
+        lo = np.array([self.hue_range[0], sat, self.min_value], np.uint8)
         hi = np.array([self.hue_range[1], 255, 255], np.uint8)
         mask = cv2.inRange(hsv, lo, hi)
         mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, np.ones((5, 5), np.uint8))
@@ -185,9 +212,136 @@ class GoldFrameCropper(Cropper):
             return None
         return extent
 
-    def _fallback(self, outer: CropResult, mask: np.ndarray, reason: str) -> CropResult:
+    def _fallback(self, outer: CropResult, mask: np.ndarray, reason: str,
+                  rgb: Optional[np.ndarray] = None) -> CropResult:
+        if self.secondary is not None and rgb is not None:
+            alt = self.secondary.crop_box(rgb)
+            if alt.status is CropStatus.OK and alt.bbox is not None:
+                return CropResult(
+                    CropStatus.OK, alt.bbox, outer.bbox, alt.method,
+                    f"{reason}; usado {alt.method}",
+                    alt.debug_mask if alt.debug_mask is not None else mask,
+                )
         if self.fallback == "skip":
             return CropResult(CropStatus.REJECTED, None, outer.bbox, self.name,
                               reason + " (descartada)", mask)
         return CropResult(CropStatus.FALLBACK, outer.bbox, outer.bbox,
                           "white-border (fallback)", reason + " (usado recorte de borda branca)", mask)
+
+
+class InkFrameCropper(Cropper):
+    """Recorta pela **moldura de tinta** (retângulo preto/vermelho).
+
+    Usa Canny + contornos aproximados a polígonos para achar o maior
+    retângulo inseto na página (folha de atlas com orla desenhada). Não
+    depende de cor dourada — cobre o caso em que ``GoldFrameCropper`` falha.
+    """
+
+    name = "ink-frame"
+
+    def __init__(self, base: Optional[Cropper] = None,
+                 detect_max_side: int = 1500,
+                 canny_low: int = 40, canny_high: int = 120,
+                 min_area_ratio: float = 0.22, max_area_ratio: float = 0.82,
+                 inner_margin: Margin = 0.002,
+                 min_inner_ratio: float = 0.3) -> None:
+        self.base = base
+        self.detect_max_side = detect_max_side
+        self.canny_low = canny_low
+        self.canny_high = canny_high
+        self.min_area_ratio = min_area_ratio
+        self.max_area_ratio = max_area_ratio
+        self.inner_margin = inner_margin
+        self.min_inner_ratio = min_inner_ratio
+
+    def crop_box(self, rgb: np.ndarray) -> CropResult:
+        if self.base is not None:
+            outer = self.base.crop_box(rgb)
+            if outer.status is not CropStatus.OK or outer.bbox is None:
+                return outer
+            ox0, oy0, ox1, oy1 = outer.bbox
+        else:
+            h0, w0 = rgb.shape[:2]
+            ox0, oy0, ox1, oy1 = 0, 0, w0, h0
+            outer = CropResult(CropStatus.OK, (ox0, oy0, ox1, oy1), (ox0, oy0, ox1, oy1), "full")
+
+        region = rgb[oy0:oy1, ox0:ox1]
+        rh, rw = region.shape[:2]
+        scale = min(1.0, self.detect_max_side / max(rh, rw))
+        small = region if scale == 1.0 else cv2.resize(
+            region, (max(1, round(rw * scale)), max(1, round(rh * scale))),
+            interpolation=cv2.INTER_AREA)
+        sh, sw = small.shape[:2]
+        edges, box = self._find_rect(small)
+        if box is None:
+            return CropResult(
+                CropStatus.FALLBACK, outer.bbox, outer.bbox, self.name,
+                "moldura de tinta não detectada", edges)
+
+        x0, y0, x1, y1 = box
+        inv = 1.0 / scale
+        pad = resolve_margin(self.inner_margin, min(rw, rh))
+        # pad para dentro da moldura (mesmo critério do gold-frame)
+        bx0 = min(rw - 1, max(0, int(round(x0 * inv)) + pad))
+        by0 = min(rh - 1, max(0, int(round(y0 * inv)) + pad))
+        bx1 = max(bx0 + 1, min(rw, int(round(x1 * inv)) - pad))
+        by1 = max(by0 + 1, min(rh, int(round(y1 * inv)) - pad))
+        bbox = (ox0 + bx0, oy0 + by0, ox0 + bx1, oy0 + by1)
+        if (bbox[2] - bbox[0] < self.min_inner_ratio * rw
+                or bbox[3] - bbox[1] < self.min_inner_ratio * rh):
+            return CropResult(
+                CropStatus.FALLBACK, outer.bbox, outer.bbox, self.name,
+                "recorte de tinta implausível (muito pequeno)", edges)
+        return CropResult(CropStatus.OK, bbox, outer.bbox, self.name, debug_mask=edges)
+
+    def _find_rect(self, small: np.ndarray) -> Tuple[np.ndarray, Optional[Tuple[int, int, int, int]]]:
+        sh, sw = small.shape[:2]
+        gray = cv2.cvtColor(small, cv2.COLOR_RGB2GRAY)
+        blur = cv2.GaussianBlur(gray, (3, 3), 0)
+        edges = cv2.Canny(blur, self.canny_low, self.canny_high)
+        k = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        edges = cv2.dilate(edges, k, iterations=1)
+        hk = cv2.getStructuringElement(cv2.MORPH_RECT, (max(9, sw // 50), 1))
+        vk = cv2.getStructuringElement(cv2.MORPH_RECT, (1, max(9, sh // 50)))
+        hv = cv2.bitwise_or(
+            cv2.morphologyEx(edges, cv2.MORPH_OPEN, hk),
+            cv2.morphologyEx(edges, cv2.MORPH_OPEN, vk),
+        )
+        comb = cv2.bitwise_or(edges, hv)
+        area_img = float(sh * sw)
+        best: Optional[Tuple[float, Tuple[int, int, int, int]]] = None
+        min_peri = 2 * (sh + sw) * 0.15
+        for mode in (cv2.RETR_LIST, cv2.RETR_EXTERNAL):
+            contours, _ = cv2.findContours(comb, mode, cv2.CHAIN_APPROX_SIMPLE)
+            for cnt in contours:
+                peri = cv2.arcLength(cnt, True)
+                if peri < min_peri:
+                    continue
+                approx = cv2.approxPolyDP(cnt, 0.02 * peri, True)
+                x, y, bw, bh = cv2.boundingRect(approx if len(approx) >= 4 else cnt)
+                ratio = (bw * bh) / area_img
+                if ratio < self.min_area_ratio or ratio > self.max_area_ratio:
+                    continue
+                ar = bw / max(bh, 1)
+                if ar < 0.45 or ar > 2.2:
+                    continue
+                margin_ok = (
+                    (x > sw * 0.02) + (y > sh * 0.02)
+                    + (x + bw < sw * 0.98) + (y + bh < sh * 0.98)
+                )
+                if margin_ok < 2:
+                    continue
+                nvert = len(approx)
+                rectness = (
+                    cv2.contourArea(approx) / max(bw * bh, 1) if nvert >= 4 else 0.5
+                )
+                score = (
+                    ratio
+                    * (1.2 if 4 <= nvert <= 8 else 0.8)
+                    * (0.6 + 0.4 * rectness)
+                    * (1 + 0.05 * margin_ok)
+                )
+                cand = (x, y, x + bw, y + bh)
+                if best is None or score > best[0]:
+                    best = (score, cand)
+        return comb, (None if best is None else best[1])

@@ -4,4 +4,11 @@ __pycache__/
 .DS_Store
 *.log
 data/
-rafa_scripts/output/*
+
+# Scans e recortes do piloto ficam no Drive
+piloto_albernaz/**/*.jpg
+piloto_albernaz/**/*.jpeg
+piloto_albernaz/**/*.png
+piloto_albernaz/**/*.tif
+piloto_albernaz/**/*.tiff
+piloto_albernaz/**/*.webp

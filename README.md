@@ -1,8 +1,10 @@
 # mapIA
 
-Preparação de datasets de mapas para ResNet: lê imagens e PDFs, recorta a moldura dourada e salva em formato `ImageFolder`.
+Piloto de 21 dias (19/11 a 10/12): curadoria manual de cartas de Albernaz I e, na semana de 26/11, extração de vetores com ResNet-50 pré-treinada e similaridade cosseno (carta inteira e recortes). A carta de Pernambuco (ca. 1630) fica isolada como consulta.
 
-O pipeline está em [`recorte_database/`](recorte_database/). Calibração, flags e limitações estão no [README de lá](recorte_database/README.md).
+A estrutura e as tabelas estão em [`piloto_albernaz/`](piloto_albernaz/). Instruções da semana em [`piloto_albernaz/LEIA-ME.md`](piloto_albernaz/LEIA-ME.md).
+
+O pipeline automático de recorte em [`recorte_database/`](recorte_database/) permanece no repositório e fica fora deste prazo.
 
 ## Instalação
 
